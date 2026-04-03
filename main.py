@@ -6,39 +6,49 @@ import os
 
 app = Flask(__name__)
 
-# Tu llave de Pixabay por si Wikipedia falla
 PIXABAY_KEY = "55285511-94ca0ba1f043883f1b1f4f57a"
 
-def buscar_en_wikipedia(query):
-    try:
-        # 1. Buscamos el título exacto en Wikipedia
-        search_url = f"https://es.wikipedia.org/w/api.php?action=query&titles={query}&prop=pageimages&format=json&pithumbsize=500&redirects=1"
-        r = requests.get(search_url, timeout=5)
-        data = r.json()
-        pages = data.get("query", {}).get("pages", {})
-        for pg in pages:
-            if "thumbnail" in pages[pg]:
-                return pages[pg]["thumbnail"]["source"]
-        return None
-    except:
-        return None
+def buscar_foto_wikipedia(query):
+    # Ponemos la primera letra en mayúscula para que Wikipedia lo entienda mejor
+    query = query.title() 
+    print(f"Intentando Wikipedia con: {query}")
+    
+    # Probamos en Wikipedia en español y luego en inglés
+    for lang in ['es', 'en']:
+        try:
+            url = f"https://{lang}.wikipedia.org/w/api.php?action=query&titles={query}&prop=pageimages&format=json&pithumbsize=500&redirects=1"
+            r = requests.get(url, timeout=5)
+            data = r.json()
+            pages = data.get("query", {}).get("pages", {})
+            for pg in pages:
+                if "thumbnail" in pages[pg]:
+                    return pages[pg]["thumbnail"]["source"]
+        except:
+            continue
+    return None
 
 @app.route('/foto')
 def get_image():
-    query = request.args.get('query', 'robot')
-    print(f"Buscando: {query}")
+    query = request.args.get('query', 'robot').strip()
     
-    # INTENTO 1: Wikipedia (Para famosos/personajes)
-    img_url = buscar_en_wikipedia(query)
+    # Limpiamos palabras como "foto de", "enseña", etc.
+    for word in ["foto de", "imagen de", "enseña", "busca"]:
+        query = query.lower().replace(word, "").strip()
+
+    # 1. Intentar Wikipedia (Famosos)
+    img_url = buscar_foto_wikipedia(query)
     
-    # INTENTO 2: Pixabay (Si Wikipedia no tiene nada)
+    # 2. Intentar Pixabay (Cosas generales)
     if not img_url:
-        print("Wikipedia falló, intentando Pixabay...")
-        search_url = f"https://pixabay.com/api/?key={PIXABAY_KEY}&q={query}&image_type=photo&orientation=horizontal&per_page=3"
-        r = requests.get(search_url)
-        data = r.json()
-        if data.get("hits"):
-            img_url = data["hits"][0]["webformatURL"]
+        print("Wikipedia falló, usando Pixabay...")
+        url_pixa = f"https://pixabay.com/api/?key={PIXABAY_KEY}&q={query.replace(' ', '+')}&image_type=photo&orientation=horizontal&per_page=3"
+        try:
+            r = requests.get(url_pixa)
+            data = r.json()
+            if data.get("hits"):
+                img_url = data["hits"][0]["webformatURL"]
+        except:
+            pass
 
     if img_url:
         try:
@@ -46,15 +56,28 @@ def get_image():
             img = Image.open(io.BytesIO(img_r.content))
             img = img.convert("RGB")
             
-            # Redimensionar a tu pantalla 240x135
+            # CROP INTELIGENTE: Para que no se vea estirado
+            ancho, alto = img.size
+            target_ratio = 240/135
+            actual_ratio = ancho/alto
+            
+            if actual_ratio > target_ratio:
+                new_width = int(target_ratio * alto)
+                offset = (ancho - new_width) // 2
+                img = img.crop((offset, 0, ancho - offset, alto))
+            else:
+                new_height = int(ancho / target_ratio)
+                offset = (alto - new_height) // 2
+                img = img.crop((0, offset, ancho, alto - offset))
+
             img = img.resize((240, 135), Image.Resampling.LANCZOS)
             
             img_io = io.BytesIO()
-            img.save(img_io, 'JPEG', quality=65)
+            img.save(img_io, 'JPEG', quality=70)
             img_io.seek(0)
             return send_file(img_io, mimetype='image/jpeg')
         except Exception as e:
-            return str(e), 500
+            return f"Error procesando: {e}", 500
             
     return "No encontré nada", 404
 
