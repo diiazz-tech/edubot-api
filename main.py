@@ -8,78 +8,75 @@ app = Flask(__name__)
 
 PIXABAY_KEY = "55285511-94ca0ba1f043883f1b1f4f57a"
 
-def buscar_foto_wikipedia(query):
-    # Ponemos la primera letra en mayúscula para que Wikipedia lo entienda mejor
-    query = query.title() 
-    print(f"Intentando Wikipedia con: {query}")
-    
-    # Probamos en Wikipedia en español y luego en inglés
+def buscar_en_wikipedia(query):
+    print(f"Buscando en Wikipedia: {query}")
     for lang in ['es', 'en']:
         try:
-            url = f"https://{lang}.wikipedia.org/w/api.php?action=query&titles={query}&prop=pageimages&format=json&pithumbsize=500&redirects=1"
-            r = requests.get(url, timeout=5)
-            data = r.json()
-            pages = data.get("query", {}).get("pages", {})
-            for pg in pages:
-                if "thumbnail" in pages[pg]:
-                    return pages[pg]["thumbnail"]["source"]
+            # 1. Buscar la página más parecida (Search)
+            search_url = f"https://{lang}.wikipedia.org/w/api.php?action=opensearch&search={query}&limit=1&format=json"
+            s_res = requests.get(search_url, timeout=5).json()
+            
+            if s_res[1]:
+                titulo_real = s_res[1][0]
+                # 2. Sacar la foto de ese título (PageImages)
+                img_url = f"https://{lang}.wikipedia.org/w/api.php?action=query&titles={titulo_real}&prop=pageimages&format=json&pithumbsize=500&redirects=1"
+                data = requests.get(img_url, timeout=5).json()
+                pages = data.get("query", {}).get("pages", {})
+                for pg in pages:
+                    if "thumbnail" in pages[pg]:
+                        return pages[pg]["thumbnail"]["source"]
         except:
             continue
     return None
 
 @app.route('/foto')
 def get_image():
-    query = request.args.get('query', 'robot').strip()
+    raw_query = request.args.get('query', 'robot').lower()
     
-    # Limpiamos palabras como "foto de", "enseña", etc.
+    # Limpiar frases típicas
+    query = raw_query
     for word in ["foto de", "imagen de", "enseña", "busca"]:
-        query = query.lower().replace(word, "").strip()
+        query = query.replace(word, "")
+    query = query.strip()
 
-    # 1. Intentar Wikipedia (Famosos)
-    img_url = buscar_foto_wikipedia(query)
+    # Paso 1: Wikipedia con búsqueda inteligente
+    img_url = buscar_en_wikipedia(query)
     
-    # 2. Intentar Pixabay (Cosas generales)
+    # Paso 2: Pixabay si lo anterior falla
     if not img_url:
-        print("Wikipedia falló, usando Pixabay...")
-        url_pixa = f"https://pixabay.com/api/?key={PIXABAY_KEY}&q={query.replace(' ', '+')}&image_type=photo&orientation=horizontal&per_page=3"
+        print("Fallo Wikipedia, a por Pixabay...")
+        url_pixa = f"https://pixabay.com/api/?key={PIXABAY_KEY}&q={query.replace(' ', '+')}&image_type=photo&per_page=3"
         try:
-            r = requests.get(url_pixa)
-            data = r.json()
+            data = requests.get(url_pixa).json()
             if data.get("hits"):
                 img_url = data["hits"][0]["webformatURL"]
-        except:
-            pass
+        except: pass
 
     if img_url:
         try:
             img_r = requests.get(img_url, timeout=10)
-            img = Image.open(io.BytesIO(img_r.content))
-            img = img.convert("RGB")
+            img = Image.open(io.BytesIO(img_r.content)).convert("RGB")
             
-            # CROP INTELIGENTE: Para que no se vea estirado
-            ancho, alto = img.size
-            target_ratio = 240/135
-            actual_ratio = ancho/alto
-            
-            if actual_ratio > target_ratio:
-                new_width = int(target_ratio * alto)
-                offset = (ancho - new_width) // 2
-                img = img.crop((offset, 0, ancho - offset, alto))
+            # Recorte inteligente 240x135
+            w, h = img.size
+            target = 240/135
+            if w/h > target:
+                new_w = int(target * h)
+                off = (w - new_w) // 2
+                img = img.crop((off, 0, w - off, h))
             else:
-                new_height = int(ancho / target_ratio)
-                offset = (alto - new_height) // 2
-                img = img.crop((0, offset, ancho, alto - offset))
+                new_h = int(w / target)
+                off = (h - new_h) // 2
+                img = img.crop((0, off, w, h - off))
 
             img = img.resize((240, 135), Image.Resampling.LANCZOS)
+            out = io.BytesIO()
+            img.save(out, 'JPEG', quality=75)
+            out.seek(0)
+            return send_file(out, mimetype='image/jpeg')
+        except: return "Error procesando", 500
             
-            img_io = io.BytesIO()
-            img.save(img_io, 'JPEG', quality=70)
-            img_io.seek(0)
-            return send_file(img_io, mimetype='image/jpeg')
-        except Exception as e:
-            return f"Error procesando: {e}", 500
-            
-    return "No encontré nada", 404
+    return "Nada encontrado", 404
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
