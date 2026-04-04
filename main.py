@@ -77,7 +77,7 @@ def get_image():
 def get_radio():
     query = request.args.get('url', 'chill').lower()
     
-    # Decidir fuente
+    # Decidir fuente (YouTube o Diccionario/URL)
     if any(x in query for x in ["pon ", "cancion", "musica"]):
         busqueda = query.replace("pon ", "").replace("la cancion ", "").replace("musica ", "")
         audio_url = buscar_en_youtube(busqueda)
@@ -91,22 +91,29 @@ def get_radio():
         r = requests.get(audio_url, stream=True, timeout=15)
         
         def generate():
-            # Usamos fragmentos de 8KB
-            for chunk in r.iter_content(chunk_size=8192):
-                if chunk:
-                    try:
-                        audio = AudioSegment.from_file(io.BytesIO(chunk))
-                        audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
-                        yield audio.raw_data
-                    except:
-                        continue
-        
+            try:
+                # Usamos fragmentos de 8KB para mantener fluidez
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        try:
+                            audio = AudioSegment.from_file(io.BytesIO(chunk))
+                            # Convertimos a 16kHz, Mono, 16-bit (formato EduBot)
+                            audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
+                            yield audio.raw_data
+                        except:
+                            continue
+            except (GeneratorExit, ConnectionResetError):
+                # Capturamos la desconexión del robot para que el servidor no dé error 500
+                print("EduBot se ha desconectado. Deteniendo streaming.")
+                return
+
         return Response(generate(), mimetype='audio/wav', headers={
             'Cache-Control': 'no-cache',
             'Transfer-Encoding': 'chunked',
             'Connection': 'keep-alive'
         })
     except Exception as e:
+        print(f"Error en streaming: {e}")
         return f"Error: {str(e)}", 500
 
 if __name__ == "__main__":
