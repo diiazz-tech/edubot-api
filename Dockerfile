@@ -1,13 +1,16 @@
 FROM python:3.11-slim
 
-# Instalar FFmpeg (el motor de audio)
+# Instalar FFmpeg para el audio
 RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY . .
 
-# Instalar las librerías de Python
+# Instalar librerías
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Comando para arrancar tu app
+# Puerto que usa Render
+EXPOSE 10000
+
+# Comando para arrancar
 CMD ["python", "main.py"]
