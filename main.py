@@ -71,54 +71,26 @@ def get_image():
         return send_file(output, mimetype='image/jpeg')
     except: return "500", 500
 
+# --- COPIA ESTO EN TU main.py EN LA SECCIÓN DE RADIO ---
 @app.route('/radio')
 def get_radio():
     query = request.args.get('url', 'chill').lower()
+    audio_url = RADIOS.get(query, query)
     
-    # Lógica de selección de fuente
-    audio_url = None
-    
-    # 1. Comprobar si es una radio del diccionario
-    if query in RADIOS:
-        audio_url = RADIOS[query]
-        print(f"Modo: Radio Guardada ({query})")
-    
-    # 2. Comprobar si es una petición de canción
-    elif any(x in query for x in ["pon ", "cancion", "musica"]):
+    if any(x in query for x in ["pon ", "cancion", "musica"]):
         busqueda = query.replace("pon ", "").replace("la cancion ", "").replace("musica ", "")
         audio_url = buscar_en_youtube(busqueda)
-        print(f"Modo: YouTube ({busqueda})")
-    
-    # 3. Si no, tratar como URL directa
-    else:
-        audio_url = query
-        print(f"Modo: URL Directa")
-
-    if not audio_url:
-        audio_url = RADIOS["chill"]
 
     try:
-        # stream=True es vital para no saturar el servidor
         r = requests.get(audio_url, stream=True, timeout=20)
-        
         def generate():
-            # USAMOS UN CHUNK PEQUEÑO (8192) PARA UN FLUJO CONSTANTE (BIT A BIT)
-            for chunk in r.iter_content(chunk_size=8192):
+            # 16KB es el equilibrio perfecto para que no pete el servidor
+            for chunk in r.iter_content(chunk_size=16384):
                 if chunk:
                     try:
-                        # Convertimos el pequeño bloque a WAV PCM instantáneamente
                         audio = AudioSegment.from_file(io.BytesIO(chunk))
                         audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
                         yield audio.raw_data
-                    except:
-                        continue
-        
+                    except: continue
         return Response(generate(), mimetype='audio/wav')
-
-    except Exception as e:
-        print(f"Error en streaming: {e}")
-        return "Error", 500
-
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    except: return "Error", 500
