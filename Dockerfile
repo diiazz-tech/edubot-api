@@ -1,14 +1,13 @@
 FROM python:3.11-slim
 
-# Instalar FFmpeg
+# Instalar FFmpeg (el motor de audio)
 RUN apt-get update && apt-get install -y ffmpeg && rm -rf /var/lib/apt/lists/*
 
-# Configurar el directorio de trabajo
 WORKDIR /app
 COPY . .
 
-# Instalar librerías de Python
+# Instalar las librerías de Python
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Comando para ejecutar la app
+# Comando para arrancar tu app
 CMD ["python", "main.py"]
