@@ -43,7 +43,7 @@ def buscar_en_youtube(cancion):
         return None
 
 def obtener_url_v3(query):
-    """Busca imágenes en Wikipedia o Pixabay"""
+    """Busca imágenes en Wikipedia"""
     try:
         url_search = f"https://es.wikipedia.org/w/api.php?action=query&list=search&srsearch={query}&format=json&srlimit=1"
         r = requests.get(url_search, headers=HEADERS, timeout=5).json()
@@ -88,32 +88,28 @@ def get_radio():
         return "No se encontró audio", 404
 
     try:
-        # Stream=True para empezar a recibir datos de inmediato
         r = requests.get(audio_url, stream=True, timeout=15)
         
         def generate():
-            # Usamos fragmentos de 8KB para que el envío sea constante y rápido
+            # Usamos fragmentos de 8KB
             for chunk in r.iter_content(chunk_size=8192):
                 if chunk:
                     try:
-                        # Conversión a formato ESP32 (16kHz, Mono, 16bit PCM)
                         audio = AudioSegment.from_file(io.BytesIO(chunk))
                         audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
                         yield audio.raw_data
                     except:
                         continue
         
-        # Respuesta con headers para desactivar el caché y forzar el streaming
         return Response(generate(), mimetype='audio/wav', headers={
             'Cache-Control': 'no-cache',
             'Transfer-Encoding': 'chunked',
             'Connection': 'keep-alive'
         })
-
     except Exception as e:
-        print(f"Error en streaming: {e}")
         return f"Error: {str(e)}", 500
 
 if __name__ == "__main__":
+    # Prioridad absoluta al puerto que asigne Render
     port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=port, debug=False)
