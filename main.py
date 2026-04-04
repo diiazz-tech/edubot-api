@@ -20,7 +20,8 @@ RADIOS = {
     "cadena dial": "https://21253.live.streamtheworld.com/CADENADIAL.mp3",
     "cadena ser": "https://cadenaser00.epimg.net/ser/directo/castillayleon/ser_valladolid.mp3",
     "cope": "https://cope-cope-rrcast.flumotion.com/cope/cope.mp3",
-    "chill": "http://stream.zeno.fm/0r0xa792kwzuv"
+    "chill": "http://stream.zeno.fm/0r0xa792kwzuv",
+    "virgin": "http://icecast.unitedradio.it/Virgin.mp3"
 }
 
 def buscar_en_youtube(cancion):
@@ -76,7 +77,7 @@ def get_image():
 def get_radio():
     query = request.args.get('url', 'chill').lower()
     
-    # Decidir si buscamos en YouTube o usamos el diccionario/URL directa
+    # Decidir fuente
     if any(x in query for x in ["pon ", "cancion", "musica"]):
         busqueda = query.replace("pon ", "").replace("la cancion ", "").replace("musica ", "")
         audio_url = buscar_en_youtube(busqueda)
@@ -87,27 +88,32 @@ def get_radio():
         return "No se encontró audio", 404
 
     try:
-        r = requests.get(audio_url, stream=True, timeout=20)
+        # Stream=True para empezar a recibir datos de inmediato
+        r = requests.get(audio_url, stream=True, timeout=15)
         
         def generate():
-            # 16KB para mantener el flujo constante sin saturar la CPU de Render
-            for chunk in r.iter_content(chunk_size=16384):
+            # Usamos fragmentos de 8KB para que el envío sea constante y rápido
+            for chunk in r.iter_content(chunk_size=8192):
                 if chunk:
                     try:
-                        # Convertimos el fragmento a PCM 16bit Mono 16kHz (lo que el ESP32 entiende)
+                        # Conversión a formato ESP32 (16kHz, Mono, 16bit PCM)
                         audio = AudioSegment.from_file(io.BytesIO(chunk))
                         audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
                         yield audio.raw_data
                     except:
                         continue
         
-        return Response(generate(), mimetype='audio/wav')
+        # Respuesta con headers para desactivar el caché y forzar el streaming
+        return Response(generate(), mimetype='audio/wav', headers={
+            'Cache-Control': 'no-cache',
+            'Transfer-Encoding': 'chunked',
+            'Connection': 'keep-alive'
+        })
 
     except Exception as e:
         print(f"Error en streaming: {e}")
-        return "Error", 500
+        return f"Error: {str(e)}", 500
 
 if __name__ == "__main__":
-    # Render usa la variable de entorno PORT
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
