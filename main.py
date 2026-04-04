@@ -1,8 +1,9 @@
-from flask import Flask, request, send_file
+from flask import Flask, request, send_file, Response
 import requests
 from PIL import Image
 import io
 import os
+from pydub import AudioSegment
 
 app = Flask(__name__)
 
@@ -67,6 +68,37 @@ def get_image():
         
     except Exception as e:
         return f"Fallo final: {str(e)}", 500
+
+# --- NUEVA FUNCIÓN PARA RADIO (MP3 A WAV) ---
+@app.route('/radio')
+def get_radio():
+    # URL de una emisora por defecto (puedes pasar otra por el parámetro ?url=)
+    radio_url = request.args.get('url', 'http://stream.zeno.fm/0r0xa792kwzuv')
+    
+    try:
+        # Conexión al stream de la radio
+        r = requests.get(radio_url, stream=True, timeout=10)
+        
+        def generate():
+            # Procesamos el stream por bloques para no saturar la RAM
+            for chunk in r.iter_content(chunk_size=64000):
+                if chunk:
+                    try:
+                        # Convertimos el bloque MP3 a WAV (16kHz, Mono, 16bit)
+                        audio = AudioSegment.from_file(io.BytesIO(chunk), format="mp3")
+                        audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
+                        
+                        # Extraemos los bytes crudos (PCM)
+                        raw_data = io.BytesIO()
+                        audio.export(raw_data, format="wav")
+                        yield raw_data.getvalue()
+                    except:
+                        continue # Si un bloque falla, pasamos al siguiente
+        
+        return Response(generate(), mimetype='audio/wav')
+
+    except Exception as e:
+        return f"Error en radio: {str(e)}", 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
