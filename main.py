@@ -8,6 +8,7 @@ import yt_dlp
 
 app = Flask(__name__)
 
+# Cabeceras para simular un navegador real
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 }
@@ -30,7 +31,7 @@ def buscar_en_youtube(cancion):
         'noplaylist': True,
         'quiet': True,
         'default_search': 'ytsearch',
-        'source_address': '0.0.0.0' # Evita errores de red en Render
+        'source_address': '0.0.0.0'
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -41,7 +42,7 @@ def buscar_en_youtube(cancion):
         return None
 
 def obtener_url_v3(query):
-    # 1. Intento con Wikipedia
+    """Busca imágenes en Wikipedia o Pixabay"""
     try:
         url_search = f"https://es.wikipedia.org/w/api.php?action=query&list=search&srsearch={query}&format=json&srlimit=1"
         r = requests.get(url_search, headers=HEADERS, timeout=5).json()
@@ -71,26 +72,42 @@ def get_image():
         return send_file(output, mimetype='image/jpeg')
     except: return "500", 500
 
-# --- COPIA ESTO EN TU main.py EN LA SECCIÓN DE RADIO ---
 @app.route('/radio')
 def get_radio():
     query = request.args.get('url', 'chill').lower()
-    audio_url = RADIOS.get(query, query)
     
+    # Decidir si buscamos en YouTube o usamos el diccionario/URL directa
     if any(x in query for x in ["pon ", "cancion", "musica"]):
         busqueda = query.replace("pon ", "").replace("la cancion ", "").replace("musica ", "")
         audio_url = buscar_en_youtube(busqueda)
+    else:
+        audio_url = RADIOS.get(query, query)
+
+    if not audio_url:
+        return "No se encontró audio", 404
 
     try:
         r = requests.get(audio_url, stream=True, timeout=20)
+        
         def generate():
-            # 16KB es el equilibrio perfecto para que no pete el servidor
+            # 16KB para mantener el flujo constante sin saturar la CPU de Render
             for chunk in r.iter_content(chunk_size=16384):
                 if chunk:
                     try:
+                        # Convertimos el fragmento a PCM 16bit Mono 16kHz (lo que el ESP32 entiende)
                         audio = AudioSegment.from_file(io.BytesIO(chunk))
                         audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
                         yield audio.raw_data
-                    except: continue
+                    except:
+                        continue
+        
         return Response(generate(), mimetype='audio/wav')
-    except: return "Error", 500
+
+    except Exception as e:
+        print(f"Error en streaming: {e}")
+        return "Error", 500
+
+if __name__ == "__main__":
+    # Render usa la variable de entorno PORT
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
