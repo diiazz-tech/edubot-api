@@ -23,18 +23,25 @@ RADIOS = {
 }
 
 def buscar_en_youtube(cancion):
-    """Busca una canción y devuelve la URL del audio"""
+    """Busca una canción y devuelve la URL directa del flujo de audio"""
+    print(f"Buscando en YouTube: {cancion}")
     ydl_opts = {
         'format': 'bestaudio/best',
         'noplaylist': True,
         'quiet': True,
         'default_search': 'ytsearch',
+        'source_address': '0.0.0.0' # Evita errores de red en Render
     }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(f"ytsearch:{cancion}", download=False)['entries'][0]
-        return info['url']
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"ytsearch:{cancion}", download=False)['entries'][0]
+            return info['url']
+    except Exception as e:
+        print(f"Error buscando en YouTube: {e}")
+        return None
 
 def obtener_url_v3(query):
+    # 1. Intento con Wikipedia
     try:
         url_search = f"https://es.wikipedia.org/w/api.php?action=query&list=search&srsearch={query}&format=json&srlimit=1"
         r = requests.get(url_search, headers=HEADERS, timeout=5).json()
@@ -59,7 +66,7 @@ def get_image():
         img = Image.open(io.BytesIO(resp.content)).convert("RGB")
         img = img.resize((240, 135), Image.Resampling.LANCZOS)
         output = io.BytesIO()
-        img.save(output, format='JPEG', quality=60) # Calidad 60 para que pese menos
+        img.save(output, format='JPEG', quality=60)
         output.seek(0)
         return send_file(output, mimetype='image/jpeg')
     except: return "500", 500
@@ -68,34 +75,50 @@ def get_image():
 def get_radio():
     query = request.args.get('url', 'chill').lower()
     
-    # 1. ¿Es una radio guardada?
+    # Lógica de selección de fuente
+    audio_url = None
+    
+    # 1. Comprobar si es una radio del diccionario
     if query in RADIOS:
         audio_url = RADIOS[query]
-    # 2. ¿Es una petición de canción (ej: "pon funky town")?
-    elif "pon " in query or "cancion" in query:
-        busqueda = query.replace("pon ", "").replace("la cancion ", "")
-        try:
-            audio_url = buscar_en_youtube(busqueda)
-        except:
-            audio_url = RADIOS["chill"]
+        print(f"Modo: Radio Guardada ({query})")
+    
+    # 2. Comprobar si es una petición de canción
+    elif any(x in query for x in ["pon ", "cancion", "musica"]):
+        busqueda = query.replace("pon ", "").replace("la cancion ", "").replace("musica ", "")
+        audio_url = buscar_en_youtube(busqueda)
+        print(f"Modo: YouTube ({busqueda})")
+    
+    # 3. Si no, tratar como URL directa
     else:
         audio_url = query
+        print(f"Modo: URL Directa")
+
+    if not audio_url:
+        audio_url = RADIOS["chill"]
 
     try:
-        r = requests.get(audio_url, stream=True, timeout=15)
+        # stream=True es vital para no saturar el servidor
+        r = requests.get(audio_url, stream=True, timeout=20)
+        
         def generate():
-            # Enviamos bloques de 16KB para que la ESP32 no se sature
-            for chunk in r.iter_content(chunk_size=16384):
+            # USAMOS UN CHUNK PEQUEÑO (8192) PARA UN FLUJO CONSTANTE (BIT A BIT)
+            for chunk in r.iter_content(chunk_size=8192):
                 if chunk:
                     try:
+                        # Convertimos el pequeño bloque a WAV PCM instantáneamente
                         audio = AudioSegment.from_file(io.BytesIO(chunk))
-                        # OPTIMIZACIÓN EXTREMA PARA ESP32:
-                        # 16000Hz, Mono, 16 bits (Lo más liviano que suena bien)
                         audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
                         yield audio.raw_data
-                    except: continue
+                    except:
+                        continue
+        
         return Response(generate(), mimetype='audio/wav')
-    except: return "Error", 500
+
+    except Exception as e:
+        print(f"Error en streaming: {e}")
+        return "Error", 500
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
