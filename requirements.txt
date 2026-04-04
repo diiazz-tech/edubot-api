@@ -1,5 +1,2 @@
-Flask
+flask
 requests
-Pillow
-pydub
-yt-dlp
