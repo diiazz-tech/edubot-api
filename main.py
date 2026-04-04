@@ -3,19 +3,15 @@ import requests
 from PIL import Image
 import io
 import os
-from pydub import AudioSegment
 import yt_dlp
 
 app = Flask(__name__)
 
-HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
+HEADERS = {'User-Agent': 'Mozilla/5.0'}
 
 RADIOS = {
     "los 40": "http://directo.los40.com/los40.mp3",
     "rock fm": "https://vid.audio-stream.com:8000/rockfm.mp3",
-    "cadena dial": "https://21253.live.streamtheworld.com/CADENADIAL.mp3",
-    "cadena ser": "https://cadenaser00.epimg.net/ser/directo/castillayleon/ser_valladolid.mp3",
-    "cope": "https://cope-cope-rrcast.flumotion.com/cope/cope.mp3",
     "chill": "http://stream.zeno.fm/0r0xa792kwzuv"
 }
 
@@ -28,7 +24,7 @@ def buscar_en_youtube(cancion):
     except: return None
 
 @app.route('/')
-def home(): return "Servidor EduBot Online"
+def home(): return "Servidor Edubot V5 - Modo Ligero"
 
 @app.route('/radio')
 def get_radio():
@@ -40,34 +36,24 @@ def get_radio():
             busqueda = query.replace("pon ", "").replace("cancion ", "")
             audio_url = buscar_en_youtube(busqueda)
 
-        if not audio_url: return "No encontrado", 404
+        if not audio_url: return "404", 404
 
-        # Pedimos el audio original
+        # Reenviamos el flujo original (MP3) sin procesar nada
         r = requests.get(audio_url, stream=True, timeout=15)
         
         def generate():
-            # USAMOS TROZOS MÁS PEQUEÑOS (8KB) PARA NO SATURAR LA RAM DE RENDER
-            for chunk in r.iter_content(chunk_size=8192):
+            for chunk in r.iter_content(chunk_size=4096):
                 if chunk:
-                    try:
-                        # Convertimos el trozo a WAV (16kHz, Mono, 16-bit)
-                        audio = AudioSegment.from_file(io.BytesIO(chunk))
-                        audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
-                        yield audio.raw_data
-                    except:
-                        # Si un trozo falla, seguimos con el siguiente en lugar de dar Error 500
-                        continue
+                    yield chunk
         
-        return Response(generate(), mimetype='audio/wav')
-
+        return Response(generate(), mimetype='audio/mpeg')
     except Exception as e:
-        print(f"Error: {e}")
-        return "Error interno", 500
+        return str(e), 500
 
 @app.route('/foto')
 def get_image():
-    # Tu codigo de fotos aqui se mantiene igual
-    return "Foto endpoint"
+    # Tu codigo de fotos se mantiene igual
+    return "Foto OK"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
