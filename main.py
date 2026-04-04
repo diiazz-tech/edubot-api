@@ -13,7 +13,6 @@ async def root():
 @app.get("/radio")
 async def radio(url: str):
     try:
-        # 1. Buscar el audio en YouTube
         ydl_opts = {
             'format': 'bestaudio/best',
             'quiet': True,
@@ -30,16 +29,15 @@ async def radio(url: str):
             
             audio_url = info['entries'][0]['url']
 
-        # 2. Configurar FFmpeg para convertir a PCM S16LE (16kHz, Mono)
-        # Este es el formato EXACTO que espera el I2S de tu ESP32
         ffmpeg_command = [
             'ffmpeg',
             '-i', audio_url,
-            '-f', 's16le',        # PCM 16-bit Little Endian
+            '-filter:a', 'volume=3.0',
+            '-f', 's16le',
             '-acodec', 'pcm_s16le',
-            '-ar', '16000',       # 16kHz
-            '-ac', '1',           # Mono
-            '-'                   # Salida a stdout
+            '-ar', '16000',
+            '-ac', '1',
+            '-'
         ]
 
         process = subprocess.Popen(
@@ -58,7 +56,8 @@ async def radio(url: str):
             finally:
                 process.kill()
 
-        return StreamingResponse(iter_audio(), media_type="audio/basic")
+        # Cambio a application/octet-stream para asegurar flujo de datos binarios puro
+        return StreamingResponse(iter_audio(), media_type="application/octet-stream")
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
