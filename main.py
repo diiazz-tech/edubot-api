@@ -1,18 +1,15 @@
-from flask import Flask, request, send_file, Response
+from flask import Flask, request, Response
 import requests
-from PIL import Image
-import io
 import os
 import yt_dlp
 
 app = Flask(__name__)
 
-HEADERS = {'User-Agent': 'Mozilla/5.0'}
-
 RADIOS = {
     "los 40": "http://directo.los40.com/los40.mp3",
     "rock fm": "https://vid.audio-stream.com:8000/rockfm.mp3",
-    "chill": "http://stream.zeno.fm/0r0xa792kwzuv"
+    "chill": "http://stream.zeno.fm/0r0xa792kwzuv",
+    "cope": "https://cope-cope-rrcast.flumotion.com/cope/cope.mp3"
 }
 
 def buscar_en_youtube(cancion):
@@ -24,36 +21,34 @@ def buscar_en_youtube(cancion):
     except: return None
 
 @app.route('/')
-def home(): return "Servidor Edubot V5 - Modo Ligero"
+def home(): return "Servidor Edubot V6 - ONLINE"
 
 @app.route('/radio')
 def get_radio():
     try:
         query = request.args.get('url', 'chill').lower()
+        # Limpiamos la paja que manda el ESP32
+        query = query.replace("de ", "").replace("la ", "").replace(".", "").strip()
+        
         audio_url = RADIOS.get(query, query)
         
-        if any(x in query for x in ["pon ", "cancion"]):
-            busqueda = query.replace("pon ", "").replace("cancion ", "")
-            audio_url = buscar_en_youtube(busqueda)
+        # Si parece una búsqueda de canción
+        if len(query) > 3 and query not in RADIOS:
+            audio_url = buscar_en_youtube(query)
 
-        if not audio_url: return "404", 404
+        if not audio_url: return "No encontrado", 404
 
-        # Reenviamos el flujo original (MP3) sin procesar nada
-        r = requests.get(audio_url, stream=True, timeout=15)
+        # REENVÍO DIRECTO (Sin procesar nada, gasta 0 RAM)
+        r = requests.get(audio_url, stream=True, timeout=10)
         
         def generate():
             for chunk in r.iter_content(chunk_size=4096):
-                if chunk:
-                    yield chunk
+                if chunk: yield chunk
         
         return Response(generate(), mimetype='audio/mpeg')
+
     except Exception as e:
         return str(e), 500
-
-@app.route('/foto')
-def get_image():
-    # Tu codigo de fotos se mantiene igual
-    return "Foto OK"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
