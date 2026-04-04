@@ -22,7 +22,6 @@ def buscar_en_youtube(cancion):
         'noplaylist': True,
         'quiet': True,
         'default_search': 'ytsearch',
-        'source_address': '0.0.0.0'
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -45,7 +44,7 @@ def obtener_url_v3(query):
     return None
 
 @app.route('/')
-def home(): return "Servidor Edubot ONLINE"
+def home(): return "Edubot Server OK"
 
 @app.route('/foto')
 def get_image():
@@ -74,24 +73,23 @@ def get_radio():
     if not audio_url: return "404", 404
 
     try:
-        r = requests.get(audio_url, stream=True, timeout=15)
+        # Aumentamos el timeout de la peticion inicial
+        r = requests.get(audio_url, stream=True, timeout=20)
+        
         def generate():
-            try:
-                # 16KB para estabilidad en Render
-                for chunk in r.iter_content(chunk_size=16384):
-                    if chunk:
-                        # Usamos 'mp3' como pista para pydub, es lo mas comun en radios
+            # Usamos un buffer intermedio para pydub
+            buffer = io.BytesIO()
+            for chunk in r.iter_content(chunk_size=12288): # 12KB
+                if chunk:
+                    try:
+                        # Convertimos a wav pcm 16bit 16khz mono
                         audio = AudioSegment.from_file(io.BytesIO(chunk))
                         audio = audio.set_frame_rate(16000).set_channels(1).set_sample_width(2)
                         yield audio.raw_data
-            except Exception as e:
-                print(f"Streaming parado: {e}")
-                return
-
-        return Response(generate(), mimetype='audio/wav', headers={
-            'Cache-Control': 'no-cache',
-            'Transfer-Encoding': 'chunked'
-        })
+                    except:
+                        continue
+        
+        return Response(generate(), mimetype='audio/wav')
     except Exception as e:
         return str(e), 500
 
