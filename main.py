@@ -1,59 +1,52 @@
 from flask import Flask, request, Response
 import requests
 import os
+import yt_dlp
 
 app = Flask(__name__)
 
-# DICCIONARIO DE RADIOS VERIFICADAS (URLs DIRECTAS MP3)
-# Estas URLs son "túneles" limpios que el ESP32 puede procesar sin errores.
+# Radios fijas por si falla YouTube
 RADIOS = {
     "chill": "http://stream.zeno.fm/0r0xa792kwzuv",
     "ibiza": "http://ibizaglobalradio.streaming-pro.com:8024/stream",
-    "lounge": "https://streaming.brol.tech/rtfmlounge",
-    "80s": "http://78.129.202.200:8030/stream",
-    "rock": "http://streaming.enacast.com/lp/rockfm/mp3",
-    "top40": "http://163.172.77.142:8454/stream"
+    "80s": "http://78.129.202.200:8030/stream"
 }
 
-@app.route('/')
-def home():
-    return "Servidor Edubot V15 - BUSCADOR DE RADIOS ONLINE"
+def buscar_en_youtube(query):
+    ydl_opts = {
+        'format': 'bestaudio/best',
+        'noplaylist': True,
+        'quiet': True,
+        'default_search': 'ytsearch1',
+        'nocheckcertificate': True,
+        'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"ytsearch1:{query}", download=False)
+            if 'entries' in info:
+                return info['entries'][0]['url']
+    except Exception as e:
+        print(f"Error YT: {e}")
+    return None
 
 @app.route('/radio')
 def get_radio():
-    try:
-        # 1. Obtener la palabra que envía el ESP32
-        query = request.args.get('url', 'chill').lower().strip()
-        print(f"Peticion recibida: {query}")
+    query = request.args.get('url', 'chill').lower().strip()
+    
+    # 1. Si es radio fija
+    audio_url = RADIOS.get(query)
+    
+    # 2. Si no, BUSCAR EN YOUTUBE
+    if not audio_url:
+        audio_url = buscar_en_youtube(query)
+    
+    if not audio_url:
+        return "No encontrado", 404
 
-        # 2. Buscar en nuestro diccionario de radios estables
-        # Si la palabra no existe en el diccionario, ponemos '80s' por defecto
-        # para que el ESP32 siempre reciba datos y no de error.
-        audio_url = RADIOS.get(query, RADIOS["80s"])
-
-        # 3. Crear la conexión con el servidor de música
-        # Usamos un User-Agent de navegador para evitar bloqueos (403 Forbidden)
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        
-        # Realizamos la petición en modo 'stream'
-        r = requests.get(audio_url, stream=True, headers=headers, timeout=10)
-
-        # 4. Enviar la respuesta al ESP32 trozo a trozo (Stream)
-        # El chunk_size de 1024 es ideal para la memoria del ESP32
-        def generate():
-            for chunk in r.iter_content(chunk_size=1024):
-                if chunk:
-                    yield chunk
-
-        return Response(generate(), mimetype='audio/mpeg')
-
-    except Exception as e:
-        print(f"Error en el servidor: {e}")
-        return str(e), 500
+    # Enviar el chorro de datos MP3
+    r = requests.get(audio_url, stream=True, timeout=15)
+    return Response(r.iter_content(chunk_size=512), mimetype='audio/mpeg')
 
 if __name__ == "__main__":
-    # Render usa la variable de entorno PORT, si no existe usa el 10000
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
