@@ -5,7 +5,7 @@ import yt_dlp
 
 app = Flask(__name__)
 
-# RADIOS CON ENLACES DIRECTOS (PROBADOS Y ESTABLES)
+# Diccionario base (el ESP32 enviará las palabras ya limpias)
 RADIOS = {
     "chill": "http://stream.zeno.fm/0r0xa792kwzuv",
     "ibiza": "http://ibizaglobalradio.streaming-pro.com:8024/stream",
@@ -16,63 +16,57 @@ RADIOS = {
 }
 
 def buscar_en_youtube(query):
-    print(f"Buscando en YouTube: {query}")
+    print(f"Buscando a fondo en YouTube: {query}")
     ydl_opts = {
         'format': 'bestaudio/best',
         'noplaylist': True,
-        'quiet': True,
+        'quiet': False, # Habilitamos logs para ver qué pasa en Render
         'default_search': 'ytsearch1',
-        'source_address': '0.0.0.0'
+        'source_address': '0.0.0.0',
+        'socket_timeout': 30  # Espera más tiempo a la respuesta de YT
     }
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # Extraer info con reintentos automáticos
             info = ydl.extract_info(f"ytsearch1:{query}", download=False)
             if 'entries' in info and len(info['entries']) > 0:
-                return info['entries'][0]['url']
+                url_directa = info['entries'][0]['url']
+                print(f"URL encontrada: {url_directa[:50]}...")
+                return url_directa
     except Exception as e:
-        print(f"Error en YouTube-DL: {e}")
+        print(f"Error en búsqueda YouTube: {e}")
     return None
 
 @app.route('/')
-def home():
-    return "Servidor Edubot V10 - ONLINE"
+def home(): return "Servidor Edubot V12 - MODO PACIENTE"
 
 @app.route('/radio')
 def get_radio():
     try:
-        query_raw = request.args.get('url', '').lower()
-        
-        # Limpieza de "paja" del dictado de voz para que la búsqueda sea limpia
-        query = query_raw
-        for basura in ["pon la radio ", "pon radio ", "pon la cancion ", "pon musica de ", "pon ", ".", ",", "de "]:
-            query = query.replace(basura, "")
-        query = query.strip()
+        query = request.args.get('url', '').lower().strip()
+        print(f"Peticion recibida del ESP32: '{query}'")
 
-        print(f"Peticion limpia recibida: '{query}'")
-
-        # 1. Intentar buscar en el diccionario de radios fijas
+        # 1. Comprobar si es una radio fija
         audio_url = RADIOS.get(query)
         
-        # 2. Si no es radio, BUSQUEDA TOTAL en YouTube (sirve para canciones o directos)
+        # 2. Si no, buscar el primer resultado en YouTube con paciencia
         if not audio_url:
-            print(f"No es radio conocida, buscando en YouTube: {query}")
             audio_url = buscar_en_youtube(query)
 
         if not audio_url:
-            return "No se ha encontrado nada", 404
+            print("No se encontró nada tras la espera.")
+            return "404", 404
 
-        # Realizar la petición al flujo de audio
-        r = requests.get(audio_url, stream=True, timeout=20, headers={'User-Agent': 'Mozilla/5.0'})
+        # Stream del audio con timeout de conexión extendido
+        r = requests.get(audio_url, stream=True, timeout=60, headers={'User-Agent': 'Mozilla/5.0'})
         
         def generate():
-            for chunk in r.iter_content(chunk_size=4096):
-                if chunk:
-                    yield chunk
+            for chunk in r.iter_content(chunk_size=8192): # Buffer más grande
+                if chunk: yield chunk
         
         return Response(generate(), mimetype='audio/mpeg')
-
     except Exception as e:
-        print(f"Error critico en el servidor: {e}")
+        print(f"Error servidor: {e}")
         return str(e), 500
 
 if __name__ == "__main__":
